@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>유사 연기영상 검색 — 작업 보고서 (2026-06-20)</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2f3a; --fg:#e6e9ef; --muted:#9aa3b2;
+          --accent:#5b9dff; --good:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:"Segoe UI",system-ui,-apple-system,sans-serif; line-height:1.65; }
+  .wrap { max-width:920px; margin:0 auto; padding:48px 24px 80px; }
+  header { border-bottom:1px solid var(--line); padding-bottom:24px; margin-bottom:32px; }
+  h1 { font-size:1.9rem; margin:0 0 8px; }
+  h2 { font-size:1.3rem; margin:40px 0 12px; padding-left:10px;
+       border-left:3px solid var(--accent); }
+  h3 { font-size:1.05rem; margin:24px 0 8px; color:var(--accent); }
+  .meta { color:var(--muted); font-size:.9rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin:16px 0; }
+  .goal { background:linear-gradient(135deg,#1a2540,#1a1d24); }
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:.92rem; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  code { background:#11141a; border:1px solid var(--line); border-radius:5px;
+         padding:1px 6px; font-size:.88em; color:#d2a8ff; }
+  pre { background:#11141a; border:1px solid var(--line); border-radius:8px;
+        padding:14px 16px; overflow-x:auto; font-size:.86rem; }
+  pre code { background:none; border:none; padding:0; color:#cdd6e4; }
+  .tag { display:inline-block; font-size:.72rem; padding:2px 9px; border-radius:20px;
+         margin-left:6px; vertical-align:middle; }
+  .done { background:rgba(63,185,80,.15); color:var(--good); border:1px solid rgba(63,185,80,.4); }
+  .ok { color:var(--good); font-weight:600; }
+  .warn { color:var(--warn); }
+  .muted { color:var(--muted); }
+  ul { padding-left:22px; }
+  li { margin:5px 0; }
+  .steps { counter-reset:step; list-style:none; padding-left:0; }
+  .steps > li { counter-increment:step; position:relative; padding-left:42px; margin:18px 0; }
+  .steps > li::before { content:counter(step); position:absolute; left:0; top:0;
+     width:28px; height:28px; background:var(--accent); color:#0b0d12; border-radius:50%;
+     display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.9rem; }
+  .big { font-size:1.05rem; }
+  .delta { color:var(--good); font-weight:700; }
+  footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line);
+           color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>🎬 유사 연기영상 검색 — 작업 보고서</h1>
+  <div class="meta">작성일 2026-06-20 · 프로젝트 <code>video-feedback</code> · 환경 Windows 11 / RTX 4060</div>
+</header>
+
+<div class="card goal">
+  <h3 style="margin-top:0">오늘의 목표</h3>
+  <p class="big" style="margin:0">
+    영상을 던지면 <b>그 영상과 가장 유사한 전문가(C-pro) 연기영상 top-K</b>를 뽑아주는
+    검색 시스템을 동작 상태로 만들고, 브라우저에서 쓸 수 있는 웹 UI까지 완성한다.
+  </p>
+  <p class="muted" style="margin:10px 0 0">
+    ※ 기존 "Gemini 영상 피드백" 스코프는 폐기 → "유사 영상 검색"으로 축소. GPU 전용.
+  </p>
+</div>
+
+<h2>한눈에 보기</h2>
+<table>
+  <tr><th>작업</th><th>결과</th></tr>
+  <tr><td>깨진 가상환경 복구</td><td class="ok">✅ uv 설치 + venv 재생성</td></tr>
+  <tr><td>torch GPU(CUDA) 전환</td><td class="ok">✅ 2.12.1+cu126 · RTX 4060 인식</td></tr>
+  <tr><td>top-K 검색 기능 (TDD)</td><td class="ok">✅ ReferenceDB.search() 추가</td></tr>
+  <tr><td>기준 영상 인덱스 구축</td><td class="ok">✅ C-pro 34개 → index.npz</td></tr>
+  <tr><td>임베딩 모델 업그레이드</td><td class="ok">✅ VideoMAE → V-JEPA 2 (변별력 ↑)</td></tr>
+  <tr><td>웹 UI</td><td class="ok">✅ Gradio · http://127.0.0.1:7860</td></tr>
+  <tr><td>테스트</td><td class="ok">✅ 13 / 13 통과</td></tr>
+</table>
+
+<h2>진행 과정</h2>
+<ol class="steps">
+
+<li>
+  <h3 style="margin-top:0">환경 복구 <span class="tag done">완료</span></h3>
+  <p>기존 <code>.venv</code>가 다른 계정(<code>C:\Users\RYU\…</code>)에서 만들어진 거라 이 PC에선
+  Python 베이스를 못 찾아 깨져 있었음. <code>uv</code> 미설치 + Python 3.13만 존재.</p>
+  <ul>
+    <li><code>pip install uv</code> → uv 0.11.23 설치</li>
+    <li><code>uv sync</code> → Python 3.11.15 기반 venv + 의존성 재현</li>
+  </ul>
+</li>
+
+<li>
+  <h3 style="margin-top:0">torch CUDA 전환 <span class="tag done">완료</span></h3>
+  <p>초기엔 CPU 빌드(<code>2.12.1+cpu</code>)라 RTX 4060 미사용. <code>pyproject.toml</code>에
+  PyTorch CUDA 인덱스를 추가해 GPU 빌드로 교체.</p>
+  <p class="muted">cu124 인덱스는 torch 2.6까지만 있어 충돌 → torch 2.12.1이 존재하는 <b>cu126</b>으로 해결.</p>
+  <pre><code>[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true</code></pre>
+  <p>결과: <code>torch 2.12.1+cu126</code>, <span class="ok">cuda available: True</span>, NVIDIA GeForce RTX 4060</p>
+</li>
+
+<li>
+  <h3 style="margin-top:0">top-K 검색 기능 — TDD <span class="tag done">완료</span></h3>
+  <p>기존 <code>match()</code>(1등만)에 더해 <code>search(vector, k)</code>를 테스트 먼저 작성 후 구현.</p>
+  <ul>
+    <li>정렬·top-K·DB 크기 클램프 테스트 2개 추가 → Red → 구현 → Green</li>
+    <li>반환: <code>list[(ref_id, 코사인 유사도)]</code>, 유사도 내림차순</li>
+  </ul>
+</li>
+
+<li>
+  <h3 style="margin-top:0">기준 영상 인덱스 구축 <span class="tag done">완료</span></h3>
+  <p><code>scripts/build_index.py</code> 작성 — C-pro 전문가 영상 <b>34개</b>를 미리 임베딩해
+  <code>index.npz</code>로 저장. (기준 영상은 미리, 질의 영상만 실시간 임베딩하는 구조)</p>
+</li>
+
+<li>
+  <h3 style="margin-top:0">임베딩 모델 업그레이드: VideoMAE → V-JEPA 2 <span class="tag done">완료</span></h3>
+  <p>VideoMAE 임베딩은 유사도가 전부 0.97대로 뭉쳐 변별력이 약했음. transformers 네이티브
+  미지원인 VideoMAEv2 대신, 더 신형이고 네이티브 지원되는 <b>V-JEPA 2 (Meta, ViT-L)</b>로 교체.</p>
+  <table>
+    <tr><th>항목</th><th>VideoMAE (이전)</th><th>V-JEPA 2 (현재)</th></tr>
+    <tr><td>모델</td><td class="muted">MCG-NJU/videomae-base</td><td>facebook/vjepa2-vitl-fpc64-256</td></tr>
+    <tr><td>차원</td><td>768</td><td>1024</td></tr>
+    <tr><td>입력 프레임</td><td>16</td><td>64</td></tr>
+    <tr><td>GPU 메모리</td><td>—</td><td>1.77 GB / 8 GB</td></tr>
+    <tr><td>자기질의 (sanity)</td><td>1.0000</td><td>1.0000</td></tr>
+    <tr><td>2~5위 유사도 분포</td><td class="warn">0.974 ~ 0.976 (뭉침)</td><td class="ok">0.866 ~ 0.884 (벌어짐)</td></tr>
+    <tr><td>자기 vs 2위 격차</td><td>0.024</td><td><span class="delta">0.116 (≈5배 ↑)</span></td></tr>
+  </table>
+</li>
+
+<li>
+  <h3 style="margin-top:0">웹 UI — Gradio <span class="tag done">완료</span></h3>
+  <p><code>app.py</code> 작성. 서버 기동 시 모델 + 인덱스를 1회 로드(GPU 상주), 업로드 영상만
+  실시간 임베딩 → 검색.</p>
+  <ul>
+    <li>입력: 질의 영상 업로드 + top-K 슬라이더</li>
+    <li>출력: 가장 유사한 전문가 영상 재생 + top-K 순위표(파일명·유사도)</li>
+    <li>서버 응답 200 확인 · <code>http://127.0.0.1:7860</code></li>
+  </ul>
+</li>
+
+</ol>
+
+<h2>최종 데이터 흐름</h2>
+<pre><code>[기준 C-pro 34개] --(미리 1회)--> VJEPA2 임베딩 --> index.npz
+                                                        │
+[업로드 질의영상] --(실시간)--> VJEPA2 임베딩 --> 코사인 top-K 검색 --> 결과</code></pre>
+
+<h2>사용법</h2>
+<pre><code># 웹앱 실행 → 브라우저 http://127.0.0.1:7860
+uv run python app.py
+
+# 인덱스 재구축 (C영상 추가/모델 변경 시에만)
+uv run python scripts/build_index.py --pattern "C-pro__*.mp4" --out index.npz
+
+# CLI 검색
+uv run python scripts/query.py &lt;영상경로&gt; --k 5
+
+# 테스트
+uv run pytest -q</code></pre>
+
+<h2>변경/생성 파일</h2>
+<table>
+  <tr><th>파일</th><th>내용</th></tr>
+  <tr><td><code>app.py</code></td><td>생성 — Gradio 웹 UI</td></tr>
+  <tr><td><code>scripts/build_index.py</code></td><td>생성 — 기준 영상 인덱스 구축</td></tr>
+  <tr><td><code>scripts/query.py</code></td><td>생성 — CLI 유사검색</td></tr>
+  <tr><td><code>src/video_feedback/embedding.py</code></td><td>수정 — V-JEPA 2로 교체</td></tr>
+  <tr><td><code>src/video_feedback/reference_db.py</code></td><td>수정 — search() top-K 추가</td></tr>
+  <tr><td><code>tests/test_reference_db.py</code></td><td>수정 — search 테스트 2개</td></tr>
+  <tr><td><code>pyproject.toml</code></td><td>수정 — cu126 인덱스, gradio 추가</td></tr>
+  <tr><td><code>index.npz</code></td><td>생성 — VJEPA2 기준 임베딩 34개</td></tr>
+  <tr><td class="muted"><code>feedback.py</code> / <code>pipeline.py</code></td><td class="muted">미사용 (삭제 안 함)</td></tr>
+</table>
+
+<h2>벡터 DB 필요 여부 (논의 결론)</h2>
+<div class="card">
+  <p><b>지금 규모(수십~수천 개)에선 불필요.</b> numpy brute-force(<code>matrix @ query</code>)가
+  더 빠르고 정확(근사 없음). 진짜 병목은 검색이 아니라 VJEPA2 임베딩(질의당 ~2초)이라 벡터DB로 안 빨라짐.</p>
+  <p class="muted">전환 시점: ① 벡터 10만+ → FAISS, ② 증분 추가/필터/멀티유저 서비스 → Qdrant·pgvector.
+  계획서 로드맵: numpy → FAISS.</p>
+</div>
+
+<h2>다음 후보</h2>
+<ul>
+  <li>아마추어 영상 여러 개로 매칭 품질 정성 검증</li>
+  <li><code>build_index.py</code> 증분 모드(이미 인덱스에 있는 건 스킵)</li>
+  <li>웹 UI 개선: 질의 영상 동시 표시 / top-K 결과 그리드 재생</li>
+  <li>규모 커지면 FAISS 인덱스로 전환</li>
+</ul>
+
+<footer>
+  video-feedback · 2026-06-20 작업 보고서 · 테스트 13/13 통과 · 임베딩 V-JEPA 2 (RTX 4060)
+</footer>
+
+</div>
+</body>
+</html>

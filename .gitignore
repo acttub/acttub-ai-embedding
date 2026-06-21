@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Video dataset (대용량, 로컬에만 유지)
+연기영상/
+
+# Logs
+*.log
