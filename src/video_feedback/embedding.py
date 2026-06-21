@@ -23,6 +23,29 @@ def l2_normalize(vec: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     return (vec / norm).astype(np.float32)
 
 
+def combine_embeddings(
+    video_vec: np.ndarray, audio_vec: np.ndarray, w_audio: float = 0.5
+) -> np.ndarray:
+    """영상·음성 임베딩을 가중치로 결합해 단일 벡터로 만든다.
+
+    각 모달을 L2 정규화돼 있다고 가정하고, 가중치의 제곱근을 곱해 concat한다.
+    이렇게 하면 결과 벡터가 자동으로 단위 길이가 되고, 두 결합 벡터의
+    코사인 유사도가 ``(1-w_audio)*영상코사인 + w_audio*음성코사인``으로 분해된다.
+
+    Args:
+        video_vec: L2 정규화된 영상 임베딩 (D_v,).
+        audio_vec: L2 정규화된 음성 임베딩 (D_a,).
+        w_audio: 음성 가중치 [0, 1]. 0이면 영상만, 1이면 음성만.
+
+    Returns:
+        shape (D_v + D_a,), dtype float32, 단위 길이 결합 벡터.
+    """
+    w_v = 1.0 - w_audio
+    v = np.sqrt(w_v) * video_vec.astype(np.float32)
+    a = np.sqrt(w_audio) * audio_vec.astype(np.float32)
+    return np.concatenate([v, a]).astype(np.float32)
+
+
 class VideoEmbedder:
     """영상을 단일 벡터로 임베딩한다 (V-JEPA 2)."""
 

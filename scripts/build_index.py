@@ -10,8 +10,9 @@ import glob
 import os
 import time
 
+from video_feedback.audio_embedding import AudioEmbedder
 from video_feedback.embedding import VideoEmbedder
-from video_feedback.reference_db import ReferenceDB
+from video_feedback.multimodal import MultiModalReferenceDB
 
 
 def build_index(
@@ -20,7 +21,7 @@ def build_index(
     out_path: str,
     num_frames: int = 64,
 ) -> None:
-    """패턴에 맞는 영상들을 임베딩해 ReferenceDB로 저장한다.
+    """패턴에 맞는 영상들을 영상+음성 임베딩해 멀티모달 인덱스로 저장한다.
 
     Args:
         clips_dir: 영상이 들어 있는 디렉터리.
@@ -32,20 +33,22 @@ def build_index(
     if not paths:
         raise SystemExit(f"매칭되는 영상이 없습니다: {clips_dir}/{pattern}")
 
-    print(f"대상 영상 {len(paths)}개 발견. 임베더 로딩 중...")
-    embedder = VideoEmbedder()
-    print(f"장치: {embedder.device}")
+    print(f"대상 영상 {len(paths)}개 발견. 영상/음성 임베더 로딩 중...")
+    video_embedder = VideoEmbedder()
+    audio_embedder = AudioEmbedder()
+    print(f"장치: video={video_embedder.device}, audio={audio_embedder.device}")
 
-    db = ReferenceDB()
+    db = MultiModalReferenceDB()
     t0 = time.perf_counter()
     for i, path in enumerate(paths, 1):
         ref_id = os.path.basename(path)
         try:
-            vec = embedder.embed(path, num_frames=num_frames)
-        except Exception as exc:  # 깨진 영상은 건너뛴다
+            vvec = video_embedder.embed(path, num_frames=num_frames)
+            avec = audio_embedder.embed(path)
+        except Exception as exc:  # 깨진 영상/오디오는 건너뛴다
             print(f"  [{i}/{len(paths)}] SKIP {ref_id}: {exc}")
             continue
-        db.add(ref_id, vec)
+        db.add(ref_id, vvec, avec)
         print(f"  [{i}/{len(paths)}] OK {ref_id}")
 
     db.save(out_path)

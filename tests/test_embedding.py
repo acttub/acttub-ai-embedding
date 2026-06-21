@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from video_feedback.embedding import l2_normalize
+from video_feedback.embedding import combine_embeddings, l2_normalize
 
 
 def test_l2_normalize_unit_length():
@@ -14,6 +14,39 @@ def test_l2_normalize_zero_vector_safe():
     v = np.zeros(4, dtype=np.float32)
     out = l2_normalize(v)
     assert not np.any(np.isnan(out))
+
+
+def test_combine_embeddings_unit_length_and_dim():
+    rs = np.random.RandomState(0)
+    v = l2_normalize(rs.randn(1024).astype(np.float32))
+    a = l2_normalize(rs.randn(512).astype(np.float32))
+    out = combine_embeddings(v, a, w_audio=0.5)
+    assert out.shape == (1536,)
+    assert np.isclose(np.linalg.norm(out), 1.0, atol=1e-5)
+
+
+def test_combine_embeddings_cosine_decomposes_by_weight():
+    # 결합 벡터의 코사인 = (1-w)*영상코사인 + w*음성코사인 이어야 한다.
+    rs = np.random.RandomState(1)
+    v1 = l2_normalize(rs.randn(1024).astype(np.float32))
+    v2 = l2_normalize(rs.randn(1024).astype(np.float32))
+    a1 = l2_normalize(rs.randn(512).astype(np.float32))
+    a2 = l2_normalize(rs.randn(512).astype(np.float32))
+    w = 0.3
+    c1 = combine_embeddings(v1, a1, w_audio=w)
+    c2 = combine_embeddings(v2, a2, w_audio=w)
+    expected = (1 - w) * float(v1 @ v2) + w * float(a1 @ a2)
+    assert np.isclose(float(c1 @ c2), expected, atol=1e-5)
+
+
+def test_combine_embeddings_zero_audio_weight_keeps_video_only():
+    rs = np.random.RandomState(2)
+    v = l2_normalize(rs.randn(1024).astype(np.float32))
+    a = l2_normalize(rs.randn(512).astype(np.float32))
+    out = combine_embeddings(v, a, w_audio=0.0)
+    # 오디오 가중치 0 → 오디오 부분 전부 0, 영상 부분은 원본 영상 벡터
+    assert np.allclose(out[1024:], 0.0, atol=1e-6)
+    assert np.allclose(out[:1024], v, atol=1e-6)
 
 
 @pytest.mark.gpu

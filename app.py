@@ -13,37 +13,41 @@ import os
 
 import gradio as gr
 
+from video_feedback.audio_embedding import AudioEmbedder
 from video_feedback.embedding import VideoEmbedder
-from video_feedback.reference_db import ReferenceDB
+from video_feedback.multimodal import MultiModalReferenceDB
 
 INDEX_PATH = "index.npz"
 CLIPS_DIR = os.path.join("연기영상", "clips")
 
 # 서버 기동 시 1회 로드 (GPU 상주)
 print("인덱스/모델 로딩 중...")
-_db = ReferenceDB.load(INDEX_PATH)
-_embedder = VideoEmbedder()
+_db = MultiModalReferenceDB.load(INDEX_PATH)
+_video_embedder = VideoEmbedder()
+_audio_embedder = AudioEmbedder()
 # ref_id(파일명) -> 재생용 전체 경로
 _ref_paths = {
     os.path.basename(p): p for p in glob.glob(os.path.join(CLIPS_DIR, "*.mp4"))
 }
-print(f"로딩 완료. 장치={_embedder.device}, 기준 영상={len(_ref_paths)}개")
+print(f"로딩 완료. 장치={_video_embedder.device}, 기준 영상={len(_ref_paths)}개")
 
 
-def search_similar(video_path: str | None, k: int):
-    """업로드 영상과 가장 유사한 top-K 기준 영상을 찾는다.
+def search_similar(video_path: str | None, k: int, w_audio: float):
+    """업로드 영상과 가장 유사한 top-K 기준 영상을 찾는다 (영상+음성).
 
     Args:
         video_path: 업로드된 질의 영상 경로 (Gradio가 임시파일로 전달).
         k: 반환할 유사 영상 수.
+        w_audio: 음성 가중치 [0, 1]. 0이면 영상만, 1이면 음성만 본다.
 
     Returns:
         (top-1 영상 경로, 순위 테이블 행 리스트). 입력이 없으면 (None, []).
     """
     if not video_path:
         return None, []
-    vec = _embedder.embed(video_path)
-    results = _db.search(vec, k=int(k))
+    vvec = _video_embedder.embed(video_path)
+    avec = _audio_embedder.embed(video_path)
+    results = _db.search(vvec, avec, w_audio=float(w_audio), k=int(k))
     rows = [
         [rank, ref_id, round(score, 4)]
         for rank, (ref_id, score) in enumerate(results, 1)
@@ -60,6 +64,13 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
         with gr.Column():
             query_video = gr.Video(label="질의 영상 업로드")
             k_slider = gr.Slider(1, 10, value=5, step=1, label="top-K")
+            w_audio_slider = gr.Slider(
+                0.0,
+                1.0,
+                value=0.5,
+                step=0.1,
+                label="음성 가중치 (0=영상만 · 1=음성만)",
+            )
             search_btn = gr.Button("유사 영상 검색", variant="primary")
         with gr.Column():
             best_video = gr.Video(label="가장 유사한 전문가 영상", interactive=False)
@@ -71,7 +82,7 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
 
     search_btn.click(
         fn=search_similar,
-        inputs=[query_video, k_slider],
+        inputs=[query_video, k_slider, w_audio_slider],
         outputs=[best_video, result_table],
     )
 
