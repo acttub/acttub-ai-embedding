@@ -15,7 +15,15 @@ import gradio as gr
 
 from video_feedback.audio_embedding import AudioEmbedder
 from video_feedback.embedding import VideoEmbedder
+from video_feedback.explain import explain_match
+from video_feedback.gemini_feedback import (
+    generate_feedback,
+    load_env,
+    render_card_markdown,
+)
 from video_feedback.multimodal import MultiModalReferenceDB
+
+load_env()  # .env에서 GEMINI_API_KEY 등을 환경변수로 로드
 
 INDEX_PATH = "index.npz"
 CLIPS_DIR = os.path.join("연기영상", "clips")
@@ -44,7 +52,7 @@ def search_similar(video_path: str | None, k: int, w_audio: float):
         (top-1 영상 경로, 순위 테이블 행 리스트). 입력이 없으면 (None, []).
     """
     if not video_path:
-        return None, []
+        return None, [], ""
     vvec = _video_embedder.embed(video_path)
     avec = _audio_embedder.embed(video_path)
     results = _db.search(vvec, avec, w_audio=float(w_audio), k=int(k))
@@ -53,7 +61,56 @@ def search_similar(video_path: str | None, k: int, w_audio: float):
         for rank, (ref_id, score) in enumerate(results, 1)
     ]
     best_path = _ref_paths.get(results[0][0]) if results else None
-    return best_path, rows
+    explanation = ""
+    if best_path:
+        # top-1 영상과 질의를 구간 매칭해 "어느 장면이 닮았는지" 설명
+        explanation = explain_match(_video_embedder, video_path, best_path)
+    return best_path, rows, explanation
+
+
+def compare_feedback(
+    video_path: str | None,
+    w_audio: float,
+    media: str,
+    situation: str,
+    character: str,
+    subtext: str,
+):
+    """입력 영상으로 (A) 단독 vs (B) 유사 C-pro 동봉 피드백 카드를 비교한다.
+
+    먼저 멀티모달 검색으로 가장 닮은 C-pro 영상을 찾고, 그 영상을 "전문가
+    기준"으로 함께 준 경우와 안 준 경우의 피드백을 각각 생성한다.
+
+    Args:
+        video_path: 배우(질의) 영상 경로.
+        w_audio: 유사 영상 검색 시 음성 가중치.
+        media/situation/character/subtext: 배우가 준 설정.
+
+    Returns:
+        (어떤 C-pro를 골랐는지 안내, A 카드 md, B 카드 md).
+    """
+    if not video_path:
+        return "영상을 먼저 올려주세요.", "", ""
+    vvec = _video_embedder.embed(video_path)
+    avec = _audio_embedder.embed(video_path)
+    results = _db.search(vvec, avec, w_audio=float(w_audio), k=1)
+    if not results:
+        return "유사 C-pro 영상을 찾지 못했습니다.", "", ""
+    ref_id, ref_score = results[0]
+    ref_path = _ref_paths.get(ref_id)
+
+    settings = dict(
+        media=media, situation=situation, character=character, subtext=subtext
+    )
+    try:
+        # (A) 입력 영상만 / (B) 입력 + 유사 C-pro(전문가 기준)
+        card_a = generate_feedback(video_path, None, **settings)
+        card_b = generate_feedback(video_path, ref_path, **settings)
+    except Exception as e:  # noqa: BLE001 — UI에 그대로 노출
+        return f"피드백 생성 실패: {e}", "", ""
+
+    info = f"비교에 쓴 유사 C-pro 영상: **{ref_id}** (유사도 {ref_score:.3f})"
+    return info, render_card_markdown(card_a), render_card_markdown(card_b)
 
 
 with gr.Blocks(title="유사 연기영상 검색") as demo:
@@ -74,6 +131,10 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
             search_btn = gr.Button("유사 영상 검색", variant="primary")
         with gr.Column():
             best_video = gr.Video(label="가장 유사한 전문가 영상", interactive=False)
+            explanation_box = gr.Textbox(
+                label="왜 이 영상이 닮았나요? (구간 매칭)",
+                interactive=False,
+            )
             result_table = gr.Dataframe(
                 headers=["순위", "영상 파일", "유사도"],
                 label="top-K 결과",
@@ -83,7 +144,40 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
     search_btn.click(
         fn=search_similar,
         inputs=[query_video, k_slider, w_audio_slider],
-        outputs=[best_video, result_table],
+        outputs=[best_video, result_table, explanation_box],
+    )
+
+    gr.Markdown("---\n## 🤖 AI 코치 피드백 비교 (A: 입력만 · B: 유사 C-pro 동봉)")
+    gr.Markdown(
+        "위에 올린 영상으로 피드백 카드를 두 가지로 생성합니다 — "
+        "**A) 입력 영상만** 줬을 때 vs **B) 가장 닮은 전문가(C-pro) 영상을 "
+        "기준으로 함께** 줬을 때. 설정은 비워도 됩니다(영상만으로 추론)."
+    )
+    with gr.Row():
+        media_in = gr.Textbox(label="매체/장르", placeholder="예: 영화 / 연극 / 드라마")
+        situation_in = gr.Textbox(label="상황", placeholder="예: 이별 통보를 받는 장면")
+    with gr.Row():
+        character_in = gr.Textbox(label="인물 설정", placeholder="예: 20대 직장인")
+        subtext_in = gr.Textbox(
+            label="서브텍스트(속마음)", placeholder="예: 붙잡고 싶지만 참는다"
+        )
+    feedback_btn = gr.Button("A/B 피드백 비교 생성", variant="primary")
+    ref_info = gr.Markdown()
+    with gr.Row():
+        card_a_md = gr.Markdown(label="A: 입력 영상만")
+        card_b_md = gr.Markdown(label="B: 유사 C-pro 동봉")
+
+    feedback_btn.click(
+        fn=compare_feedback,
+        inputs=[
+            query_video,
+            w_audio_slider,
+            media_in,
+            situation_in,
+            character_in,
+            subtext_in,
+        ],
+        outputs=[ref_info, card_a_md, card_b_md],
     )
 
 

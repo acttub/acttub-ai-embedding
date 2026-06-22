@@ -50,6 +50,21 @@ def test_combine_embeddings_zero_audio_weight_keeps_video_only():
 
 
 @pytest.mark.gpu
+def test_embed_segments_shape_and_normalized():
+    import glob
+
+    clips = sorted(glob.glob("연기영상/clips/*.mp4"))
+    if not clips:
+        pytest.skip("클립 데이터 없음")
+    from video_feedback.embedding import VideoEmbedder
+
+    segs = VideoEmbedder().embed_segments(clips[0], num_segments=4)
+    assert segs.shape == (4, 1024)  # 4구간 × VJEPA 1024차원
+    norms = np.linalg.norm(segs, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-3)  # 각 구간 L2 정규화
+
+
+@pytest.mark.gpu
 def test_embed_returns_unit_vector(tmp_path):
     import cv2
 

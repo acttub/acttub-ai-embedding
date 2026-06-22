@@ -82,3 +82,37 @@ class VideoEmbedder:
         features = self.model.get_vision_features(**inputs)
         pooled = features.mean(dim=1).squeeze(0)
         return l2_normalize(pooled.float().cpu().numpy())
+
+    @torch.no_grad()
+    def embed_segments(
+        self, video_path: str, num_frames: int = 64, num_segments: int = 4
+    ) -> np.ndarray:
+        """영상을 시간 구간으로 나눠 각 구간의 임베딩을 반환한다.
+
+        V-JEPA 2는 영상을 시공간 토큰 격자(시간 32 × 공간 256)로 들고 있다.
+        전체 평균(embed) 대신 시간축을 num_segments 그룹으로 묶어 평균내면,
+        추가 추론 없이 추론 1회로 구간별 임베딩을 얻는다. "어느 장면이
+        닮았는지"를 짚는 구간 매칭에 쓴다.
+
+        Args:
+            video_path: 영상 파일 경로.
+            num_frames: 샘플링할 프레임 수 (V-JEPA 2 기본 64).
+            num_segments: 나눌 구간 수. 시간 토큰 수(32)의 약수여야 한다.
+
+        Returns:
+            shape (num_segments, D), dtype float32, 각 행이 L2 정규화된 구간 임베딩.
+        """
+        frames = load_frames(video_path, num_frames=num_frames)
+        video = torch.from_numpy(frames).permute(0, 3, 1, 2)
+        inputs = self.processor(video, return_tensors="pt").to(self.device)
+        feats = self.model.get_vision_features(**inputs).squeeze(0)  # (T*S, D)
+
+        n_tokens, dim = feats.shape
+        n_time = 32  # 실측: 토큰 8192 = 32(시간) × 256(공간)
+        n_spatial = n_tokens // n_time
+        feats = feats.reshape(n_time, n_spatial, dim)
+
+        per = n_time // num_segments
+        feats = feats[: per * num_segments].reshape(num_segments, per, n_spatial, dim)
+        segs = feats.mean(dim=(1, 2)).float().cpu().numpy()  # (num_segments, D)
+        return np.stack([l2_normalize(s) for s in segs])

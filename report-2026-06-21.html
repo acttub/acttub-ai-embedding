@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>유사 연기영상 검색 — 작업 보고서 (2026-06-21)</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2f3a; --fg:#e6e9ef; --muted:#9aa3b2;
+          --accent:#5b9dff; --good:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:"Segoe UI",system-ui,-apple-system,sans-serif; line-height:1.65; }
+  .wrap { max-width:920px; margin:0 auto; padding:48px 24px 80px; }
+  header { border-bottom:1px solid var(--line); padding-bottom:24px; margin-bottom:32px; }
+  h1 { font-size:1.9rem; margin:0 0 8px; }
+  h2 { font-size:1.3rem; margin:40px 0 12px; padding-left:10px;
+       border-left:3px solid var(--accent); }
+  h3 { font-size:1.05rem; margin:24px 0 8px; color:var(--accent); }
+  .meta { color:var(--muted); font-size:.9rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin:16px 0; }
+  .goal { background:linear-gradient(135deg,#1a2540,#1a1d24); }
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:.92rem; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  code { background:#11141a; border:1px solid var(--line); border-radius:5px;
+         padding:1px 6px; font-size:.88em; color:#d2a8ff; }
+  pre { background:#11141a; border:1px solid var(--line); border-radius:8px;
+        padding:14px 16px; overflow-x:auto; font-size:.86rem; }
+  pre code { background:none; border:none; padding:0; color:#cdd6e4; }
+  .tag { display:inline-block; font-size:.72rem; padding:2px 9px; border-radius:20px;
+         margin-left:6px; vertical-align:middle; }
+  .done { background:rgba(63,185,80,.15); color:var(--good); border:1px solid rgba(63,185,80,.4); }
+  .ok { color:var(--good); font-weight:600; }
+  .warn { color:var(--warn); }
+  .muted { color:var(--muted); }
+  ul { padding-left:22px; }
+  li { margin:5px 0; }
+  .steps { counter-reset:step; list-style:none; padding-left:0; }
+  .steps > li { counter-increment:step; position:relative; padding-left:42px; margin:18px 0; }
+  .steps > li::before { content:counter(step); position:absolute; left:0; top:0;
+     width:28px; height:28px; background:var(--accent); color:#0b0d12; border-radius:50%;
+     display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.9rem; }
+  .big { font-size:1.05rem; }
+  .quote { background:#11141a; border-left:3px solid var(--good); border-radius:6px;
+           padding:12px 16px; margin:14px 0; color:#cdd6e4; }
+  footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line);
+           color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🎬 유사 연기영상 검색 — 작업 보고서</h1>
+  <div class="meta">2026-06-21 · 멀티모달(영상+음성) + "왜 비슷한지" 설명</div>
+</header>
+
+<div class="card goal">
+  <div class="big">영상 단일모달 검색에 <b>음성(CLAP) 모달</b>과 <b>"왜 비슷한지" 구간 매칭 설명</b>을
+  붙이고, 그 위에 <b>Gemini AI 코치 피드백 카드(A/B 비교)</b>까지 얹었다. GitHub 첫 푸시 완료.</div>
+  <div class="meta" style="margin-top:8px">전 과정 TDD · 최종 테스트 <span class="ok">38개 통과</span> (GPU 4개 제외)</div>
+</div>
+
+<h2>이번 세션 큰 줄기</h2>
+<ol class="steps">
+  <li><b>GitHub 첫 커밋 + 푸시</b> <span class="tag done">DONE</span><br>
+    <span class="muted">코드만, 433MB 영상 데이터 제외</span></li>
+  <li><b>오디오 임베딩(CLAP) + 멀티모달 결합 검색</b> <span class="tag done">DONE</span><br>
+    <span class="muted">영상+음성 가중 결합, 런타임 비중 조절</span></li>
+  <li><b>"왜 비슷한지 설명" v1 — 구간 매칭</b> <span class="tag done">DONE</span><br>
+    <span class="muted">추가 모델 0으로 "어느 장면이 닮았는지" 짚기 · app 통합까지 완료</span></li>
+  <li><b>Gemini AI 코치 피드백 카드 — A/B 비교</b> <span class="tag done">DONE</span><br>
+    <span class="muted">입력만 vs 유사 C-pro 동봉, 5단계 내부 추론 프롬프트, app 통합</span></li>
+</ol>
+
+<h2>1. GitHub 첫 푸시</h2>
+<div class="card">
+  <ul>
+    <li>원격: <code>github.com/acttub/acttub-ai-embedding</code> (<code>main</code>)</li>
+    <li><code>.gitignore</code>에 <code>연기영상/</code>(433MB), <code>*.log</code> 추가 → 코드/인덱스/보고서만 푸시</li>
+    <li>시크릿 스캔: 실제 <code>.env</code> 없음 (<code>.venv</code> 내 라이브러리만, 이미 제외)</li>
+  </ul>
+</div>
+
+<h2>2. 오디오 임베딩 + 멀티모달</h2>
+<table>
+  <tr><th>추가</th><th>역할</th></tr>
+  <tr><td><code>audio_utils.load_audio</code></td><td>PyAV로 영상 → 모노 파형 추출 (48kHz 리샘플)</td></tr>
+  <tr><td><code>audio_embedding.AudioEmbedder</code></td><td>CLAP(<code>laion/clap-htsat-unfused</code>) 오디오 임베딩 512d</td></tr>
+  <tr><td><code>embedding.combine_embeddings</code></td><td>영상+음성 가중 결합 벡터</td></tr>
+  <tr><td><code>multimodal.MultiModalReferenceDB</code></td><td>영상/음성 벡터 분리 저장 → 런타임 가중치 결합 검색</td></tr>
+</table>
+<div class="card">
+  <h3>결합 수학</h3>
+  <p>각 모달을 L2정규화한 뒤 <code>√w</code>를 곱해 concat하면, 결과가 자동으로 단위벡터가 되고
+  코사인이 가중 분해된다:</p>
+  <pre><code>combined = concat([√(1-w)·영상_norm, √w·음성_norm])
+→ ||combined|| = 1
+→ 코사인 = (1-w)·영상코사인 + w·음성코사인</code></pre>
+  <p class="muted">차원이 달라도(영상 1024 + 음성 512) 문제없고, 가중치 <code>w</code>로
+  "영상 더 볼지 음성 더 볼지" 런타임 조절.</p>
+</div>
+<ul>
+  <li>app/CLI에 <b>음성 가중치 슬라이더/옵션</b> (0=영상만 · 1=음성만)</li>
+  <li><code>index.npz</code> 멀티모달 재구축 (C-pro 34개: video 1024d + audio 512d)</li>
+</ul>
+
+<h2>3. "왜 비슷한지 설명" — 구간 매칭</h2>
+<div class="card">
+  <p>핵심: V-JEPA가 영상을 단일 벡터로 뭉개기 전에 <b>시공간 토큰(시간 32 × 공간 256)</b>을
+  들고 있다. 전체 평균 대신 <b>시간축을 구간으로 묶어</b> 평균내면 추가 추론 없이 구간 임베딩을 얻는다.</p>
+</div>
+<table>
+  <tr><th>추가</th><th>역할</th></tr>
+  <tr><td><code>embedding.embed_segments</code></td><td>추론 1회로 구간별 임베딩 <code>(num_segments, 1024)</code></td></tr>
+  <tr><td><code>video_utils.get_duration</code></td><td>구간 인덱스 → 타임스탬프 환산용 영상 길이</td></tr>
+  <tr><td><code>explain.match_segments</code></td><td>질의×기준 구간 코사인 매트릭스 → 가장 닮은 쌍</td></tr>
+  <tr><td><code>explain.explain_match</code></td><td>위를 조합해 설명 문장 생성</td></tr>
+</table>
+<div class="quote">"인풋 영상의 10~30초 부근이 C영상의 20~40초 부근과 가장 비슷했어요 (유사도 0.91)"</div>
+<p class="muted">app 검색 결과에 설명 박스 추가. 사용자 피드백 반영해 mm:ss → "초 부근" 부드러운 표현으로 변경.</p>
+
+<h2>4. AI 코치 피드백 카드 — Gemini A/B 비교</h2>
+<div class="card">
+  <p>유사검색만으로는 "닮은 영상"까지만 보여준다. 그 위에 <b>실제로 뭘 고치면 되는지</b>를
+  배우 언어로 짚는 <b>피드백 카드</b>를 Gemini로 생성. 원래 스코프 축소로 잔재였던
+  "Gemini 영상 피드백"을, 이번엔 <b>유사검색 결과를 활용하는 형태</b>로 되살렸다.</p>
+</div>
+<table>
+  <tr><th>추가</th><th>역할</th></tr>
+  <tr><td><code>gemini_feedback.build_prompt</code></td><td>배우 설정 4개(매체·상황·인물·서브텍스트)를 <code>prompt.txt</code> 자리표시자에 채움. 빈 칸은 "비어 있음" 결측 표시</td></tr>
+  <tr><td><code>gemini_feedback.generate_feedback</code></td><td>영상 업로드(ACTIVE 대기) → Gemini 호출 → 카드 JSON 파싱. <code>ref_video</code> 주면 C-pro를 "전문가 기준선"으로 동봉</td></tr>
+  <tr><td><code>gemini_feedback.parse_feedback_json</code></td><td>모델 응답에서 <code>```json</code> 펜스/잡설 벗기고 첫 <code>{</code>~마지막 <code>}</code>만 파싱</td></tr>
+  <tr><td><code>gemini_feedback.render_card_markdown</code></td><td>카드 JSON → 사람이 읽는 마크다운(강점·관찰·원인·연습·기대효과)</td></tr>
+  <tr><td><code>gemini_feedback.load_env</code></td><td>외부 의존성 없는 미니 <code>.env</code> 로더 (<code>GEMINI_API_KEY</code>). 기존 환경변수는 안 덮음</td></tr>
+  <tr><td><code>app.compare_feedback</code></td><td>유사검색 top-1 C-pro를 찾아 <b>A(입력만) vs B(C-pro 동봉)</b> 카드 2장 생성·비교</td></tr>
+</table>
+<div class="card">
+  <h3>A/B 비교 설계</h3>
+  <p>같은 입력 영상에 대해 두 가지로 피드백을 뽑아 나란히 보여준다:</p>
+  <ul>
+    <li><b>A</b> — 입력 영상만 주고 피드백</li>
+    <li><b>B</b> — 가장 닮은 <b>C-pro 영상을 "전문가 기준선"으로 함께</b> 주고 피드백</li>
+  </ul>
+  <p class="muted">B에는 <code>_REF_PREAMBLE</code>로 "첫 영상은 평가 대상이 아니라 잘된 연기의 기준선,
+  피드백은 오직 두 번째 배우 영상에 대해서만"을 못박아 C-pro를 채점하지 않게 막았다.
+  유사검색이 피드백 품질을 실제로 끌어올리는지 눈으로 비교하는 게 목적.</p>
+</div>
+<div class="card">
+  <h3>프롬프트 (<code>prompt.txt</code>) — 5단계 내부 추론</h3>
+  <p>관찰 → 진단 → 카드 초안 → 톤 다듬기 → 전문가 패널 검토를 모델 내부에서 돌리고,
+  <b>최종 출력은 <code>overallStrength</code> + <code>feedbackCards</code> JSON 하나</b>로만 고정(API 계약 유지).</p>
+  <ul>
+    <li>핵심 규칙: <b>영상에서 "실제로 보이고 들린 것"에만 근거</b> — 어림 타임코드·지어낸 대사·일반론 금지</li>
+    <li>표면(가면) vs 누수 둘 다 관찰 → 과소/과잉 방향 판정 → 더하기/빼기 처방</li>
+    <li>매체 보정(영화=절제 / 연극=객석 전달), 충돌 1개·강점 1개·바로 따라할 처방</li>
+  </ul>
+  <p class="muted">출처: 우영이 프롬프트에서 변수명만 맞춘 버전.</p>
+</div>
+<div class="card" style="border-color:rgba(248,81,73,.4)">
+  <p class="warn"><b>⚠ 유료 API</b> — Gemini는 유료 호출이라 <b>자동 실행 금지</b>. 코드/테스트만 작성했고
+  실제 호출은 사용자 명시 허가 시에만. 테스트는 전부 <code>_FakeClient</code> mock으로 돌려
+  <b>네트워크·과금 0</b>. <code>app.py</code>의 A/B 버튼을 눌러야만 실제 호출된다.</p>
+</div>
+
+<h2>5. 기술적 발견 (gotcha)</h2>
+<div class="card">
+  <ul>
+    <li><b>V-JEPA 토큰 8192 = 32(시간) × 256(공간)</b> — 실측 확인(<code>probe_tokens.py</code>). 구간 매칭의 근거.</li>
+    <li><b>CLAP은 10초 초과 입력을 랜덤 구간으로 잘라(rand_trunc) 비결정적</b> → 10초 청크로 나눠 평균내 회피 + 전체 반영.</li>
+    <li><b>transformers 5.x API 변경</b>: <code>audios=</code> → <code>audio=</code>, <code>get_audio_features</code>가 output 객체 반환 → <code>.pooler_output</code>(512d).</li>
+    <li><b>PyAV 17</b>: <code>av.AVError</code> → <code>av.FFmpegError</code>로 개명.</li>
+    <li><b>uv가 PATH에 없음</b> → <code>py -m uv ...</code>로 호출. <code>.venv</code>엔 pip 없음(uv 프로젝트).</li>
+    <li><b>Gemini SDK는 지연 import</b> — <code>from google import genai</code>를 <code>_client()</code> 안에서만.
+      SDK 미설치·키 없어도 모듈 import/테스트는 통과(유료 경로를 격리).</li>
+    <li><b>Gemini 영상 입력은 업로드 후 ACTIVE 대기</b> — <code>PROCESSING</code> 동안 폴링하다 ACTIVE 돼야 호출 가능.</li>
+  </ul>
+</div>
+
+<h2>6. 정성 검증 포인트 <span class="tag" style="background:rgba(210,153,34,.15);color:var(--warn);border:1px solid rgba(210,153,34,.4)">열린 항목</span></h2>
+<div class="card">
+  <ul>
+    <li class="warn">토큰 time-major 가정 — <code>embed_segments</code>는 토큰 순서가 (시간, 공간)이라 가정.
+      V-JEPA 2 표준이지만 100%는 아님. 실제 영상으로 구간 설명이 말 되는지 검증 진행 중.</li>
+    <li class="muted">사용자 관찰: 질의/C 구간이 같게 나오는 경우 있으나 정밀 매칭은 비요구사항 (대략 범위면 OK).</li>
+  </ul>
+</div>
+
+<h2>7. 커밋 & 다음 후보</h2>
+<table>
+  <tr><th>커밋</th><th></th></tr>
+  <tr><td><code>2a8da15</code></td><td>Initial commit: V-JEPA 2 기반 유사 영상 검색 시스템</td></tr>
+  <tr><td><code>f00f8ae</code></td><td>오디오 임베딩(CLAP) + 멀티모달 결합 검색 추가</td></tr>
+  <tr><td class="muted">미커밋</td><td class="muted">구간 매칭 설명(<code>explain.py</code>) + app 통합 — working tree에 있음</td></tr>
+  <tr><td class="muted">미커밋</td><td class="muted">Gemini AI 코치 피드백 카드(A/B) + <code>prompt.txt</code> — working tree에 있음</td></tr>
+</table>
+<p class="muted">구간 매칭과 Gemini 피드백은 코드·테스트(38개 통과) 완료, 아직 커밋 전 상태.
+다음에 두 덩어리로 나눠 커밋 예정.</p>
+<h3>다음 후보</h3>
+<ul>
+  <li>구간 매칭 + Gemini 피드백 두 기능 <b>커밋 & 푸시</b></li>
+  <li>실제 영상으로 <b>A/B 피드백 정성 비교</b> — C-pro 동봉이 카드 품질을 올리는지 확인 (유료 API, 허가 후)</li>
+  <li>"왜 비슷한지" v2 — CLAP <b>텍스트 질의</b>로 음성 속성 설명 ("격앙된 목소리" 등)</li>
+  <li>음성 구간 매칭 ("영상은 이 장면, 음성은 저 구간이 닮음" 분리 설명)</li>
+  <li><code>build_index.py</code> 증분 모드</li>
+</ul>
+
+<footer>video-feedback · V-JEPA 2 + CLAP 멀티모달 유사 연기영상 검색 · 2026-06-21</footer>
+</div>
+</body>
+</html>

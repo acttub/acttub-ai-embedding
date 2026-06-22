@@ -44,3 +44,26 @@ def load_frames(path: str, num_frames: int = 16) -> np.ndarray:
         frames.append(frames[-1])
 
     return np.stack(frames[:num_frames]).astype(np.uint8)
+
+
+def get_duration(path: str) -> float:
+    """영상 길이를 초 단위로 반환한다.
+
+    Args:
+        path: 영상 파일 경로.
+
+    Returns:
+        영상 길이(초).
+
+    Raises:
+        ValueError: 영상을 열 수 없거나 FPS를 읽을 수 없을 때.
+    """
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise ValueError(f"영상을 열 수 없습니다: {path}")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    if fps <= 0:
+        raise ValueError(f"FPS를 읽을 수 없습니다: {path}")
+    return total / fps

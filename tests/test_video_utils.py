@@ -8,9 +8,7 @@ def _make_dummy_video(tmp_path):
     import cv2
 
     path = tmp_path / "dummy.mp4"
-    writer = cv2.VideoWriter(
-        str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (64, 64)
-    )
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (64, 64))
     for _ in range(30):
         writer.write(np.zeros((64, 64, 3), dtype=np.uint8))
     writer.release()
@@ -28,3 +26,11 @@ def test_load_frames_shape(tmp_path):
 def test_load_frames_invalid_path():
     with pytest.raises(ValueError):
         load_frames("does_not_exist.mp4")
+
+
+def test_get_duration_returns_seconds(tmp_path):
+    from video_feedback.video_utils import get_duration
+
+    path = _make_dummy_video(tmp_path)  # 30프레임 @ 10fps = 3초
+    dur = get_duration(str(path))
+    assert abs(dur - 3.0) < 0.5
