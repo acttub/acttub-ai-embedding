@@ -59,7 +59,7 @@ def test_embed_segments_shape_and_normalized():
     from video_feedback.embedding import VideoEmbedder
 
     segs = VideoEmbedder().embed_segments(clips[0], num_segments=4)
-    assert segs.shape == (4, 1024)  # 4구간 × VJEPA 1024차원
+    assert segs.shape == (4, 768)  # 4구간 × 표정(FER ViT) 768차원
     norms = np.linalg.norm(segs, axis=1)
     assert np.allclose(norms, 1.0, atol=1e-3)  # 각 구간 L2 정규화
 

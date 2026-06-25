@@ -1,9 +1,16 @@
-"""V-JEPA 2 기반 영상 임베딩."""
+"""얼굴 표정(FER) 기반 영상 임베딩.
+
+연기영상은 표정·감정이 핵심이라, 영상 전체의 모션/장면을 보는 V-JEPA 2 대신
+프레임별 얼굴 크롭을 표정 인식 ViT(`trpakov/vit-face-expression`)에 넣어
+CLS 토큰(768d)을 표정 임베딩으로 쓴다. 기존 V-JEPA 구현은 ``embedding_vjepa.py``에
+보존돼 있다.
+"""
 
 import numpy as np
 import torch
-from transformers import AutoModel, AutoVideoProcessor
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 
+from video_feedback.face_utils import FaceDetector, center_crop_square
 from video_feedback.video_utils import load_frames
 
 
@@ -47,72 +54,90 @@ def combine_embeddings(
 
 
 class VideoEmbedder:
-    """영상을 단일 벡터로 임베딩한다 (V-JEPA 2)."""
+    """영상을 얼굴 표정 임베딩 단일 벡터로 변환한다 (ViT-FER, 768d)."""
 
     def __init__(
         self,
-        model_name: str = "facebook/vjepa2-vitl-fpc64-256",
+        model_name: str = "trpakov/vit-face-expression",
         device: str | None = None,
     ) -> None:
-        """임베더를 초기화한다.
+        """임베더를 초기화한다 (표정 ViT + 얼굴 검출기).
 
         Args:
-            model_name: HuggingFace 모델 ID (V-JEPA 2 계열).
+            model_name: HuggingFace 표정 인식 ViT 모델 ID.
             device: 추론 장치. None이면 가능 시 cuda, 아니면 cpu.
         """
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.processor = AutoVideoProcessor.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(self.device).eval()
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
+        self.model = (
+            AutoModelForImageClassification.from_pretrained(model_name)
+            .to(self.device)
+            .eval()
+        )
+        self.detector = FaceDetector(device=self.device, image_size=224)
 
     @torch.no_grad()
-    def embed(self, video_path: str, num_frames: int = 64) -> np.ndarray:
-        """영상 경로를 L2 정규화된 1D float32 임베딩 벡터로 변환한다.
+    def _frame_embeddings(self, video_path: str, num_frames: int) -> np.ndarray:
+        """프레임별 얼굴 크롭의 표정 임베딩(CLS 768d) 배열을 반환한다.
+
+        프레임마다 가장 큰 얼굴을 크롭해 ViT-FER에 넣고 마지막 hidden state의
+        CLS 토큰을 뽑는다. 얼굴이 검출된 프레임만 쓰되, 클립 전체에 얼굴이
+        하나도 없으면 모든 프레임을 중앙 크롭으로 폴백한다.
 
         Args:
             video_path: 영상 파일 경로.
-            num_frames: 샘플링할 프레임 수 (V-JEPA 2 기본 64).
+            num_frames: 샘플링할 프레임 수.
 
         Returns:
-            shape (D,), dtype float32, L2 정규화된 임베딩 벡터.
+            shape (T, 768), dtype float32. T는 사용된 프레임 수(≤ num_frames).
         """
-        frames = load_frames(video_path, num_frames=num_frames)  # (T, H, W, C) uint8
-        video = torch.from_numpy(frames).permute(0, 3, 1, 2)  # T, C, H, W
-        inputs = self.processor(video, return_tensors="pt").to(self.device)
-        # 토큰별 비전 특징 → 평균 풀링으로 영상 단일 벡터
-        features = self.model.get_vision_features(**inputs)
-        pooled = features.mean(dim=1).squeeze(0)
-        return l2_normalize(pooled.float().cpu().numpy())
+        frames = load_frames(video_path, num_frames=num_frames)  # (T,H,W,3) RGB
+        crops = [
+            face
+            for fr in frames
+            if (face := self.detector.crop_largest(fr)) is not None
+        ]
+        if not crops:  # 얼굴이 전혀 안 잡히면 중앙 크롭 폴백
+            crops = [center_crop_square(fr, size=224) for fr in frames]
+        inputs = self.processor(images=crops, return_tensors="pt").to(self.device)
+        out = self.model(**inputs, output_hidden_states=True)
+        cls = out.hidden_states[-1][:, 0]  # (T, 768) CLS 토큰
+        return cls.float().cpu().numpy()
 
-    @torch.no_grad()
+    def embed(self, video_path: str, num_frames: int = 64) -> np.ndarray:
+        """영상 경로를 L2 정규화된 1D float32 표정 임베딩으로 변환한다.
+
+        Args:
+            video_path: 영상 파일 경로.
+            num_frames: 샘플링할 프레임 수.
+
+        Returns:
+            shape (768,), dtype float32, L2 정규화된 임베딩 벡터.
+        """
+        feats = self._frame_embeddings(video_path, num_frames)
+        return l2_normalize(feats.mean(axis=0))
+
     def embed_segments(
         self, video_path: str, num_frames: int = 64, num_segments: int = 4
     ) -> np.ndarray:
-        """영상을 시간 구간으로 나눠 각 구간의 임베딩을 반환한다.
+        """영상을 시간 구간으로 나눠 각 구간의 표정 임베딩을 반환한다.
 
-        V-JEPA 2는 영상을 시공간 토큰 격자(시간 32 × 공간 256)로 들고 있다.
-        전체 평균(embed) 대신 시간축을 num_segments 그룹으로 묶어 평균내면,
-        추가 추론 없이 추론 1회로 구간별 임베딩을 얻는다. "어느 장면이
-        닮았는지"를 짚는 구간 매칭에 쓴다.
+        프레임별 표정 임베딩을 시간 순서대로 ``num_segments`` 그룹으로 묶어
+        각 그룹을 평균낸다. "어느 장면의 표정이 닮았는지" 구간 매칭에 쓴다.
 
         Args:
             video_path: 영상 파일 경로.
-            num_frames: 샘플링할 프레임 수 (V-JEPA 2 기본 64).
-            num_segments: 나눌 구간 수. 시간 토큰 수(32)의 약수여야 한다.
+            num_frames: 샘플링할 프레임 수.
+            num_segments: 나눌 구간 수.
 
         Returns:
-            shape (num_segments, D), dtype float32, 각 행이 L2 정규화된 구간 임베딩.
+            shape (num_segments, 768), dtype float32, 각 행이 L2 정규화된 구간 임베딩.
         """
-        frames = load_frames(video_path, num_frames=num_frames)
-        video = torch.from_numpy(frames).permute(0, 3, 1, 2)
-        inputs = self.processor(video, return_tensors="pt").to(self.device)
-        feats = self.model.get_vision_features(**inputs).squeeze(0)  # (T*S, D)
-
-        n_tokens, dim = feats.shape
-        n_time = 32  # 실측: 토큰 8192 = 32(시간) × 256(공간)
-        n_spatial = n_tokens // n_time
-        feats = feats.reshape(n_time, n_spatial, dim)
-
-        per = n_time // num_segments
-        feats = feats[: per * num_segments].reshape(num_segments, per, n_spatial, dim)
-        segs = feats.mean(dim=(1, 2)).float().cpu().numpy()  # (num_segments, D)
-        return np.stack([l2_normalize(s) for s in segs])
+        feats = self._frame_embeddings(video_path, num_frames)  # (T, 768)
+        t = feats.shape[0]
+        bounds = np.linspace(0, t, num_segments + 1).astype(int)
+        segs = []
+        for s in range(num_segments):
+            lo, hi = bounds[s], max(bounds[s] + 1, bounds[s + 1])
+            segs.append(l2_normalize(feats[lo:hi].mean(axis=0)))
+        return np.stack(segs)
