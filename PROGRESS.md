@@ -1,7 +1,7 @@
 # 진행 상황 / 이어서 작업 (video-feedback)
 
 > 최종 업데이트: 2026-06-25
-> 한 줄 요약: **영상 던지면 유사한 전문가(C-pro) 연기영상 top-K를 뽑아주는 검색 시스템.** **얼굴 표정(FER)+음성(멀티모달)** 검색. 동작 + 웹 UI 완성.
+> 한 줄 요약: **영상 던지면 유사한 전문가(C-pro) 연기영상 top-K를 뽑아주는 검색 시스템.** **얼굴 표정(FER)+음성(CLAP)+대본(STT)** 3-모달 검색. 동작 + 웹 UI 완성.
 
 ---
 
@@ -23,7 +23,19 @@
   - `MultiModalReferenceDB`: 영상/음성 벡터 분리 저장 → 런타임 가중치 결합 검색
   - app에 **음성 가중치 슬라이더** (0=영상만 · 1=음성만)
   - `index.npz` 멀티모달 재구축 (C-pro 34개: video 1024d + audio 512d)
-- [x] 테스트 23/23 통과
+- [x] **대본(STT) 임베딩 + 3-모달 결합 검색** ← 2026-06-25 추가
+  - `Transcriber`: Whisper `openai/whisper-large-v3-turbo` (HF transformers, 기존 torch cu126 재사용). 16kHz 모노, 한국어, 30초 청크. 무음/오디오無 → `""`
+  - `TextEmbedder`: `jhgan/ko-sroberta-multitask` (Sentence-Transformers, 768d). 빈 텍스트 → 영벡터(대본 모달 0 기여)
+  - `combine_embeddings` → `combine_weighted([벡터들], [가중치들])`로 N-모달 일반화 (2-모달 래퍼 하위호환)
+  - `MultiModalReferenceDB`: 텍스트 모달 **옵셔널** 추가. `search(q_v, q_a, q_t, w_audio, w_text)`, 영상가중치=1-w_audio-w_text. 구버전 인덱스(text無)도 그대로 로드
+  - **빠른 갱신**: 영상/음성은 이미 있으니 `scripts/add_text_modality.py`로 **대본만 얹음**(FER/CLAP 재계산 X, 50개마다 체크포인트+이어하기). 풀 재구축은 `build_index.py`
+  - ⚠️ Windows: build/augment 스크립트는 `sys.stdout.reconfigure(utf-8)` 필수 — 한국어 대본 print가 cp949에서 `UnicodeEncodeError`로 죽었던 이력
+- [x] **3-모달 전용 앱 + 비율 슬라이더 3개** ← 2026-06-26 ✅ 동작 확인
+  - `app.py`는 이제 **3-모달 전용** (`INDEX_PATH=index_3mod.npz`, 대본 없는 인덱스면 기동 거부). 검색은 항상 영상+음성+대본 다 씀
+  - **영상/음성/대본 비율 슬라이더 3개** 전부 직접 조절. 세 값은 `_normalize3`로 **합=1 자동 정규화** → `search`엔 (w_audio, w_text)만 넘김(영상=1-둘)
+  - 모델 5개 = 모달 3개지만 영상(MTCNN 검출 + ViT-FER) / 대본(Whisper STT + ko-sroberta)이 각각 2단계라서
+  - ⚠️ **현재 인덱스는 부분 600/1145개** (`index_3mod.npz`, STT 중단 지점). 나머지 545개 채우려면 아래 "이어하기"
+- [x] 테스트 통과 (단위 fast 16개 + GPU STT/텍스트 5개), 앱 3-모달 기동 확인 (port 7860)
 
 스코프: 원래 "Gemini 영상 피드백" → "유사 영상 검색"으로 축소. `feedback.py`/`pipeline.py`는 미사용 잔재. GPU 전용.
 
@@ -34,16 +46,20 @@
 ```powershell
 cd C:\Users\RJS\Desktop\project\video-feedback
 
-# 1) 웹앱 실행 (모델 2개 로딩 ~30초 후 http://127.0.0.1:7860)
-py -m uv run python app.py
+# 1) 3-모달 웹앱 실행 (모델 5개 로딩 ~1분 후 http://127.0.0.1:7860)
+#    index_3mod.npz(대본 포함) 필요. 영상/음성/대본 비율 슬라이더 3개.
+$env:PYTHONUTF8="1"; py -m uv run python app.py
 
-# 2) CLI 검색 (--w-audio: 음성 가중치 0~1, 기본 0.5)
-py -m uv run python scripts/query.py <영상경로> --k 5 --w-audio 0.5
+# 2) ⏭ 대본 인덱스 이어하기 (현재 600/1145 → 545개 더 채우기, ~40분)
+$env:PYTHONUTF8="1"; py -m uv run python scripts/add_text_modality.py --base index_2mod.npz --out index_3mod.npz
 
-# 3) 인덱스 재구축 (C영상 추가/모델 변경 시에만, 영상+음성 임베딩)
-py -m uv run python scripts/build_index.py --pattern "C-pro__*.mp4" --out index.npz
+# 3) CLI 검색 (--w-audio 음성, --w-text 대본; 영상=1-음성-대본. 기본 0.4/0.2)
+py -m uv run python scripts/query.py <영상경로> --index index_3mod.npz --k 5 --w-audio 0.4 --w-text 0.2
 
-# 4) 테스트 (GPU 테스트 포함하려면 -m gpu)
+# 4) 인덱스 풀 재구축 (C영상 추가/모델 변경 시에만, 영상+음성+대본 전부)
+$env:PYTHONUTF8="1"; py -m uv run python scripts/build_index.py --pattern "C-pro__*.mp4" --out index_3mod.npz
+
+# 5) 테스트 (GPU 테스트 포함하려면 -m gpu)
 py -m uv run pytest -q
 ```
 
@@ -80,10 +96,16 @@ py -m uv run pytest -q
 | `src/video_feedback/embedding_vjepa.py` | (보존) 구버전 V-JEPA 임베딩 |
 | `src/video_feedback/audio_embedding.py` | CLAP 오디오 임베딩 (`AudioEmbedder`) |
 | `src/video_feedback/audio_utils.py` | PyAV 오디오 파형 추출 (`load_audio`) |
-| `src/video_feedback/multimodal.py` | 영상/음성 결합 검색 (`MultiModalReferenceDB`) |
+| `src/video_feedback/stt.py` | Whisper STT 받아쓰기 (`Transcriber`) |
+| `src/video_feedback/text_embedding.py` | ko-sroberta 대본 임베딩 (`TextEmbedder`) |
+| `src/video_feedback/multimodal.py` | 영상/음성/대본 결합 검색 (`MultiModalReferenceDB`) |
 | `src/video_feedback/reference_db.py` | numpy 코사인 검색 (`match`, `search`) |
 | `src/video_feedback/video_utils.py` | opencv 프레임 샘플링 (`load_frames`) |
-| `index.npz` | C-pro 34개 멀티모달 임베딩 (**video 768d** + audio 512d) |
+| `scripts/add_text_modality.py` | 2-모달 인덱스에 대본(STT) 모달만 얹기 (빠른 갱신) |
+| `index_3mod.npz` | **앱이 쓰는 3-모달 인덱스** (video 768d + audio 512d + text 768d). 현재 부분 **600/1145** |
+| `index_3mod_partial.npz` | (백업) 위와 동일한 600개 체크포인트 |
+| `index.npz` | 2-모달 full 1145개 (video 768d + audio 512d). 3-모달 앱은 안 씀 |
+| `index_2mod.npz` | (백업) 2-모달 full 1145개 = 이어하기 `--base` |
 | `index_vjepa.npz` | (백업) 구버전 V-JEPA 인덱스 (video 1024d + audio 512d) |
 | `연기영상/clips/` | 영상 데이터 (A-amateur / B-student / C-pro, git 제외) |
 | `feedback.py`, `pipeline.py` | (미사용, Gemini 시절 잔재) |
@@ -92,6 +114,8 @@ py -m uv run pytest -q
 
 ## 다음 후보 (TODO)
 
+- [ ] ⏭ **대본 인덱스 1145개 완성** — 현재 600개. `add_text_modality.py --base index_2mod.npz --out index_3mod.npz` 로 이어하기 (~40분)
+- [ ] 대본 매칭 변별력 정성 검증 (대본 비율↑일 때 의미 비슷한 영상 잘 잡는지)
 - [x] **"왜 비슷한지 설명" v1 — 구간 매칭** (`explain.py`, FER 프레임 임베딩 기반으로 재작동)
 - [ ] "왜 비슷한지" v2 — CLAP 텍스트 질의로 음성 속성 설명 ("격앙된 목소리" 등)
 - [ ] FER 표정 매칭 변별력 정성 검증 (아마추어 여러 개, 코사인 잘 벌어지는지)

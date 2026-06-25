@@ -15,5 +15,9 @@ wheels/
 # Logs
 *.log
 
+# 백업/부분 인덱스 (중복, 로컬에만 유지). 앱이 쓰는 index_3mod.npz / index.npz만 버전관리
+index_2mod.npz
+index_3mod_partial.npz
+
 # Secrets
 .env

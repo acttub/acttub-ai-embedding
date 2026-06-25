@@ -22,40 +22,75 @@ from video_feedback.gemini_feedback import (
     render_card_markdown,
 )
 from video_feedback.multimodal import MultiModalReferenceDB
+from video_feedback.stt import Transcriber
+from video_feedback.text_embedding import TextEmbedder
 
 load_env()  # .env에서 GEMINI_API_KEY 등을 환경변수로 로드
 
-INDEX_PATH = "index.npz"
+# 3-모달 전용: 대본(text) 임베딩이 들어 있는 인덱스만 사용한다.
+INDEX_PATH = os.environ.get("INDEX_PATH", "index_3mod.npz")
 CLIPS_DIR = os.path.join("연기영상", "clips")
 
 # 서버 기동 시 1회 로드 (GPU 상주)
 print("인덱스/모델 로딩 중...")
 _db = MultiModalReferenceDB.load(INDEX_PATH)
+if not _db._has_text():
+    raise SystemExit(
+        f"3-모달 인덱스가 아닙니다(대본 임베딩 없음): {INDEX_PATH}\n"
+        "scripts/add_text_modality.py 로 대본 모달을 채운 인덱스를 지정하세요."
+    )
 _video_embedder = VideoEmbedder()
 _audio_embedder = AudioEmbedder()
+_transcriber = Transcriber()
+_text_embedder = TextEmbedder()
 # ref_id(파일명) -> 재생용 전체 경로
 _ref_paths = {
     os.path.basename(p): p for p in glob.glob(os.path.join(CLIPS_DIR, "*.mp4"))
 }
-print(f"로딩 완료. 장치={_video_embedder.device}, 기준 영상={len(_ref_paths)}개")
+print(f"로딩 완료(3-모달). 장치={_video_embedder.device}, 기준 영상={len(_db._ids)}개")
 
 
-def search_similar(video_path: str | None, k: int, w_audio: float):
-    """업로드 영상과 가장 유사한 top-K 기준 영상을 찾는다 (영상+음성).
+def _normalize3(w_video: float, w_audio: float, w_text: float) -> tuple[float, float]:
+    """영상/음성/대본 가중치를 합=1로 정규화해 (w_audio, w_text)를 돌려준다.
+
+    search()는 영상 가중치를 ``1 - w_audio - w_text``로 자동 계산하므로
+    음성·대본 두 값만 넘기면 된다. 셋 다 0이면 1/3씩 균등 배분한다.
+    """
+    total = float(w_video) + float(w_audio) + float(w_text)
+    if total <= 0:
+        return 1 / 3, 1 / 3
+    return float(w_audio) / total, float(w_text) / total
+
+
+def search_similar(
+    video_path: str | None,
+    k: int,
+    w_video: float,
+    w_audio: float,
+    w_text: float,
+):
+    """업로드 영상과 가장 유사한 top-K 기준 영상을 찾는다 (영상+음성+대본 3-모달).
+
+    영상/음성/대본 가중치는 합=1로 자동 정규화돼 "상대 비율"로 동작한다.
 
     Args:
         video_path: 업로드된 질의 영상 경로 (Gradio가 임시파일로 전달).
         k: 반환할 유사 영상 수.
-        w_audio: 음성 가중치 [0, 1]. 0이면 영상만, 1이면 음성만 본다.
+        w_video: 영상(표정) 비율.
+        w_audio: 음성(파형) 비율.
+        w_text: 대본(STT) 비율.
 
     Returns:
-        (top-1 영상 경로, 순위 테이블 행 리스트). 입력이 없으면 (None, []).
+        (top-1 영상 경로, 순위 테이블, 구간설명, 질의 대본). 입력 없으면 빈 값.
     """
     if not video_path:
-        return None, [], ""
+        return None, [], "", ""
+    wa, wt = _normalize3(w_video, w_audio, w_text)
     vvec = _video_embedder.embed(video_path)
     avec = _audio_embedder.embed(video_path)
-    results = _db.search(vvec, avec, w_audio=float(w_audio), k=int(k))
+    script = _transcriber.transcribe(video_path)
+    tvec = _text_embedder.embed(script)
+    results = _db.search(vvec, avec, tvec, w_audio=wa, w_text=wt, k=int(k))
     rows = [
         [rank, ref_id, round(score, 4)]
         for rank, (ref_id, score) in enumerate(results, 1)
@@ -65,12 +100,15 @@ def search_similar(video_path: str | None, k: int, w_audio: float):
     if best_path:
         # top-1 영상과 질의를 구간 매칭해 "어느 장면이 닮았는지" 설명
         explanation = explain_match(_video_embedder, video_path, best_path)
-    return best_path, rows, explanation
+    transcript = script or "(대사 없음/무음)"
+    return best_path, rows, explanation, transcript
 
 
 def compare_feedback(
     video_path: str | None,
+    w_video: float,
     w_audio: float,
+    w_text: float,
     media: str,
     situation: str,
     character: str,
@@ -91,9 +129,11 @@ def compare_feedback(
     """
     if not video_path:
         return "영상을 먼저 올려주세요.", "", ""
+    wa, wt = _normalize3(w_video, w_audio, w_text)
     vvec = _video_embedder.embed(video_path)
     avec = _audio_embedder.embed(video_path)
-    results = _db.search(vvec, avec, w_audio=float(w_audio), k=1)
+    tvec = _text_embedder.embed(_transcriber.transcribe(video_path))
+    results = _db.search(vvec, avec, tvec, w_audio=wa, w_text=wt, k=1)
     if not results:
         return "유사 C-pro 영상을 찾지 못했습니다.", "", ""
     ref_id, ref_score = results[0]
@@ -121,16 +161,23 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
         with gr.Column():
             query_video = gr.Video(label="질의 영상 업로드")
             k_slider = gr.Slider(1, 10, value=5, step=1, label="top-K")
+            gr.Markdown("**모달 비율** (세 값은 합=1로 자동 정규화)")
+            w_video_slider = gr.Slider(
+                0.0, 1.0, value=0.4, step=0.05, label="영상(표정 FER) 비율"
+            )
             w_audio_slider = gr.Slider(
-                0.0,
-                1.0,
-                value=0.5,
-                step=0.1,
-                label="음성 가중치 (0=영상만 · 1=음성만)",
+                0.0, 1.0, value=0.4, step=0.05, label="음성(파형 CLAP) 비율"
+            )
+            w_text_slider = gr.Slider(
+                0.0, 1.0, value=0.2, step=0.05, label="대본(STT) 비율"
             )
             search_btn = gr.Button("유사 영상 검색", variant="primary")
         with gr.Column():
             best_video = gr.Video(label="가장 유사한 전문가 영상", interactive=False)
+            transcript_box = gr.Textbox(
+                label="질의 영상 대본 (STT)",
+                interactive=False,
+            )
             explanation_box = gr.Textbox(
                 label="왜 이 영상이 닮았나요? (구간 매칭)",
                 interactive=False,
@@ -143,8 +190,14 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
 
     search_btn.click(
         fn=search_similar,
-        inputs=[query_video, k_slider, w_audio_slider],
-        outputs=[best_video, result_table, explanation_box],
+        inputs=[
+            query_video,
+            k_slider,
+            w_video_slider,
+            w_audio_slider,
+            w_text_slider,
+        ],
+        outputs=[best_video, result_table, explanation_box, transcript_box],
     )
 
     gr.Markdown("---\n## 🤖 AI 코치 피드백 비교 (A: 입력만 · B: 유사 C-pro 동봉)")
@@ -171,7 +224,9 @@ with gr.Blocks(title="유사 연기영상 검색") as demo:
         fn=compare_feedback,
         inputs=[
             query_video,
+            w_video_slider,
             w_audio_slider,
+            w_text_slider,
             media_in,
             situation_in,
             character_in,

@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from video_feedback.embedding import combine_embeddings, l2_normalize
+from video_feedback.embedding import (
+    combine_embeddings,
+    combine_weighted,
+    l2_normalize,
+)
 
 
 def test_l2_normalize_unit_length():
@@ -47,6 +51,23 @@ def test_combine_embeddings_zero_audio_weight_keeps_video_only():
     # 오디오 가중치 0 → 오디오 부분 전부 0, 영상 부분은 원본 영상 벡터
     assert np.allclose(out[1024:], 0.0, atol=1e-6)
     assert np.allclose(out[:1024], v, atol=1e-6)
+
+
+def test_combine_weighted_three_modal_decomposes():
+    rs = np.random.RandomState(3)
+
+    def unit(n):
+        return l2_normalize(rs.randn(n).astype(np.float32))
+
+    v1, a1, t1 = unit(8), unit(4), unit(6)
+    v2, a2, t2 = unit(8), unit(4), unit(6)
+    ws = [0.5, 0.3, 0.2]
+    c1 = combine_weighted([v1, a1, t1], ws)
+    c2 = combine_weighted([v2, a2, t2], ws)
+    expected = ws[0] * float(v1 @ v2) + ws[1] * float(a1 @ a2) + ws[2] * float(t1 @ t2)
+    assert c1.shape == (18,)
+    assert np.isclose(float(c1 @ c2), expected, atol=1e-5)
+    assert np.isclose(np.linalg.norm(c1), 1.0, atol=1e-5)  # 가중치 합 1 → 단위
 
 
 @pytest.mark.gpu
