@@ -14,10 +14,8 @@ import time
 from video_feedback.audio_embedding import AudioEmbedder
 from video_feedback.embedding import VideoEmbedder
 from video_feedback.multimodal import MultiModalReferenceDB
-from video_feedback.stt import Transcriber
-from video_feedback.text_embedding import TextEmbedder
 
-# Windows 콘솔/파일 리다이렉트 기본 cp949가 한국어 대본 출력에서 죽는 걸 막는다.
+# Windows 콘솔/파일 리다이렉트 기본 cp949가 한국어 출력에서 죽는 걸 막는다.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except (AttributeError, ValueError):
@@ -30,7 +28,7 @@ def build_index(
     out_path: str,
     num_frames: int = 64,
 ) -> None:
-    """패턴에 맞는 영상들을 영상+음성+대본 임베딩해 멀티모달 인덱스로 저장한다.
+    """패턴에 맞는 영상들을 영상(표정)+음성 임베딩해 2-모달 인덱스로 저장한다.
 
     Args:
         clips_dir: 영상이 들어 있는 디렉터리.
@@ -42,14 +40,11 @@ def build_index(
     if not paths:
         raise SystemExit(f"매칭되는 영상이 없습니다: {clips_dir}/{pattern}")
 
-    print(f"대상 영상 {len(paths)}개 발견. 영상/음성/대본 임베더 로딩 중...")
+    print(f"대상 영상 {len(paths)}개 발견. 영상(표정)/음성 임베더 로딩 중...")
     video_embedder = VideoEmbedder()
     audio_embedder = AudioEmbedder()
-    transcriber = Transcriber()
-    text_embedder = TextEmbedder()
     print(
-        f"장치: video={video_embedder.device}, audio={audio_embedder.device}, "
-        f"stt={transcriber.device}, text={text_embedder.device}"
+        f"장치: video={video_embedder.device}, audio={audio_embedder.device}"
     )
 
     db = MultiModalReferenceDB()
@@ -59,15 +54,12 @@ def build_index(
         try:
             vvec = video_embedder.embed(path, num_frames=num_frames)
             avec = audio_embedder.embed(path)
-            script = transcriber.transcribe(path)
-            tvec = text_embedder.embed(script)
         except Exception as exc:  # 깨진 영상/오디오는 건너뛴다
             print(f"  [{i}/{len(paths)}] SKIP {ref_id}: {exc}", flush=True)
             continue
-        db.add(ref_id, vvec, avec, tvec)
-        preview = script[:30].replace("\n", " ") if script else "(무음)"
-        print(f"  [{i}/{len(paths)}] OK {ref_id}  대본: {preview}", flush=True)
-        # 1146개라 오래 걸려 → 50개마다 체크포인트 저장(중간에 죽어도 손해 최소화)
+        db.add(ref_id, vvec, avec)
+        print(f"  [{i}/{len(paths)}] OK {ref_id}", flush=True)
+        # 개수가 많아 오래 걸려 → 50개마다 체크포인트 저장(중간에 죽어도 손해 최소화)
         if i % 50 == 0:
             db.save(out_path)
             print(f"  ... 체크포인트 저장 ({len(db._ids)}개)", flush=True)

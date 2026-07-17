@@ -1,7 +1,18 @@
 # 진행 상황 / 이어서 작업 (video-feedback)
 
-> 최종 업데이트: 2026-06-25
-> 한 줄 요약: **영상 던지면 유사한 전문가(C-pro) 연기영상 top-K를 뽑아주는 검색 시스템.** **얼굴 표정(FER)+음성(CLAP)+대본(STT)** 3-모달 검색. 동작 + 웹 UI 완성.
+> 최종 업데이트: 2026-07-17
+> 한 줄 요약: **영상 던지면 유사한 전문가(C-pro) 연기영상 top-K를 뽑아주는 검색 시스템.** **얼굴 표정(HSEmotion)+음성(CLAP)** 2-모달 검색.
+
+---
+
+## 2026-07-17 — 대본 제거 + 표정 모델을 ML 스코어러와 통일
+
+- **대본(STT/텍스트) 모달 완전 제거.** `text_embedding.py`·`stt.py`·`add_text_modality.py`·해당 테스트 삭제, `multimodal.py`/`build_index.py`/`query.py`/`app.py`에서 text 배선 제거 → **순수 2-모달(표정+음성)**. `sentence-transformers` 의존성 제거.
+- **표정 임베딩을 ML 스코어러(acting-score)와 같은 모델로 교체.** `trpakov/vit-face-expression`(ViT 768d) → **HSEmotion `enet_b0_8_va_mtl`**(ONNX). 얼굴 검출도 MTCNN(facenet-pytorch) → **YuNet**(스코어러와 동일)로 통일. `facenet-pytorch` 제거, `hsemotion-onnx`/`onnxruntime` 추가, `embedding.py`에서 torch 의존 제거.
+  - 프레임별 10d(8감정 확률 + valence + arousal) → 시간 통계(평균·표준편차) **20d**, L2 정규화. 평균=무슨 감정, std=표현 역동성. 스코어러 감정 head와 같은 공간 → "닮았다고 검색된 영상"과 "비슷하게 채점"이 일관.
+  - YuNet 파일: `models/face_detection_yunet_2023mar.onnx`.
+  - ⚠️ **인덱스 재빌드 필요.** 기존 `index.npz`/`index_3mod.npz`는 video 768d(+text)라 새 embedder(20d)와 호환 안 됨. `연기영상/clips/` 확보 후 `uv run python scripts/build_index.py --out index.npz` 재실행해야 앱이 동작.
+- 검증: py3.11 non-gpu 테스트 15개 + 실제 HSEmotion embed 스모크(20d 단위벡터) 통과.
 
 ---
 
