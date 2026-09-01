@@ -64,7 +64,11 @@ def fetch(url: str, start: float | None, end: float | None, cache: str) -> str:
         return dest
     # 영상+오디오를 반드시 합쳐 받는다 — 단일 mp4 포맷만 고르면 쇼츠에서
     # 오디오 없는 스트림이 잡혀 CLAP 임베딩이 실패한다.
-    cmd = ["yt-dlp", "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b",
+    # H.264(avc1)를 강제한다 — 유튜브가 AV1 스트림을 주면 미니PC(OpenCV)가
+    # 디코드하지 못해 프레임 읽기가 통째로 실패한다. H.264 는 어디서나 풀린다.
+    cmd = ["yt-dlp",
+           "-f", "bv*[vcodec^=avc1][height<=720]+ba[ext=m4a]/"
+                 "bv*[vcodec^=avc1]+ba/b[vcodec^=avc1]/b[height<=720]/b",
            "--merge-output-format", "mp4", "--force-keyframes-at-cuts", "-o", dest]
     if start is not None or end is not None:
         s = "" if start is None else int(start)
