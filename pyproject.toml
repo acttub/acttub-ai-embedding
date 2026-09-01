@@ -9,16 +9,18 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "av>=17.1.0",
-    "facenet-pytorch>=2.5.3",
     "google-genai>=2.9.0",
     "gradio>=6.19.0",
+    "hsemotion-onnx>=0.3",
     "numpy>=2.4.6",
+    "onnxruntime>=1.20",
     "opencv-python>=4.13.0.92",
     "pillow>=12.2.0",
-    "sentence-transformers>=5.6.0",
     "torch>=2.12.1",
-    "torchvision>=0.27.1",
     "transformers>=5.12.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.uv.sources]
