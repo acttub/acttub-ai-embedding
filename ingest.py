@@ -62,8 +62,10 @@ def fetch(url: str, start: float | None, end: float | None, cache: str) -> str:
     dest = os.path.join(cache, tag + ".mp4")
     if os.path.exists(dest) and os.path.getsize(dest) > 100_000:
         return dest
-    cmd = ["yt-dlp", "-f", "mp4[height<=720]/best[height<=720]", "--force-keyframes-at-cuts",
-           "-o", dest]
+    # 영상+오디오를 반드시 합쳐 받는다 — 단일 mp4 포맷만 고르면 쇼츠에서
+    # 오디오 없는 스트림이 잡혀 CLAP 임베딩이 실패한다.
+    cmd = ["yt-dlp", "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b",
+           "--merge-output-format", "mp4", "--force-keyframes-at-cuts", "-o", dest]
     if start is not None or end is not None:
         s = "" if start is None else int(start)
         e = "inf" if end is None else int(end)
